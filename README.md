@@ -226,17 +226,3 @@ fleet_health_monitor/
     mission_log.csv             # generated at runtime
   package.xml / setup.py / setup.cfg
 ```
-
-## Notes / things to check before recording the demo video
-
-- Confirm `models/fault_classifier.pkl` exists before launching (dashboard_node
-  will fail to start without it — locate it via
-  `ament_index_python.packages.get_package_share_directory`, not a relative
-  path, since colcon installs it to `share/fleet_health_monitor/models/`).
-- The table needs ~20 samples (2s at 10Hz) per unit before predictions start;
-  units show "warming up..." until then.
-- Consider `cycle_step:=3` or higher so bearing wear / overheating visibly
-  progress within a 3-minute video.
-- Ctrl+C shutdown is clean (guarded with `rclpy.ok()` before
-  `rclpy.shutdown()` in every node's `main()`), so the video can end on a
-  Ctrl+C without a traceback appearing on screen.
