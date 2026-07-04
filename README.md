@@ -4,10 +4,10 @@
 
 ## Which weeks this bridges
 
-| Week | What it contributes |
-|---|---|
-| **Week 1 — ROS 2 plumbing** | 4 independent, namespaced publisher nodes (`/unit_1/telemetry` … `/unit_4/telemetry`), a central subscriber/aggregator node (`dashboard_node`), and a logger node — all brought up together from one launch file. |
-| **Week 3 — Machine learning** | An offline-trained `RandomForestClassifier` that classifies each unit's rolling telemetry window into one of 4 fault classes, run live inside the dashboard node. |
+| Week                          | What it contributes                                                                                                                                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Week 1 — ROS 2 plumbing**   | 4 independent, namespaced publisher nodes (`/unit_1/telemetry` … `/unit_4/telemetry`), a central subscriber/aggregator node (`dashboard_node`), and a logger node — all brought up together from one launch file. |
+| **Week 3 — Machine learning** | An offline-trained `RandomForestClassifier` that classifies each unit's rolling telemetry window into one of 4 fault classes, run live inside the dashboard node.                                                 |
 
 This project does not use Week 2 (Nav2/Gazebo) — it's a 2-way fusion by design, per the "at least two" requirement.
 
@@ -34,15 +34,17 @@ different config, which is the "multi-node plumbing" idea from Week 1.
 buffer per unit, computes 8 features (mean/std of current, mean/std/slope
 of vibration, mean/std/slope of temp), and runs the pre-trained classifier
 on each unit independently. It prints a live color-coded table and
-publishes a summary string to `/fleet/status`.
+publishes a summary string to `/fleet/status` in the format
+`unit_id:label:confidence:cycle` (pipe-separated across units), which both
+`telemetry_logger.py` and `gui_monitor.py` consume.
 
 ## Fault taxonomy
 
-| Class | Signature |
-|---|---|
-| `HEALTHY` | All 3 signals flat at baseline ± small noise |
-| `BEARING_WEAR` | Vibration mean *and* variance grow nonlinearly over time; current/temp stay flat |
-| `OVERHEATING` | Temperature climbs steadily, current creeps up with it, vibration normal |
+| Class            | Signature                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `HEALTHY`        | All 3 signals flat at baseline ± small noise                                                                             |
+| `BEARING_WEAR`   | Vibration mean _and_ variance grow nonlinearly over time; current/temp stay flat                                         |
+| `OVERHEATING`    | Temperature climbs steadily, current creeps up with it, vibration normal                                                 |
 | `SENSOR_DROPOUT` | After an onset cycle, one signal randomly flatlines or spikes to a fixed bad value (intermittent, ~35% chance per cycle) |
 
 Signal generation lives in one shared module
@@ -52,12 +54,12 @@ on exactly the distribution it sees at inference time.
 
 ## Model performance (held-out test set, 25% split)
 
-| Class | Precision | Recall | F1 |
-|---|---|---|---|
-| BEARING_WEAR | 1.00 | 0.96 | 0.98 |
-| HEALTHY | 0.72 | 1.00 | 0.83 |
-| OVERHEATING | 1.00 | 1.00 | 1.00 |
-| SENSOR_DROPOUT | 1.00 | 0.64 | 0.78 |
+| Class          | Precision | Recall | F1   |
+| -------------- | --------- | ------ | ---- |
+| BEARING_WEAR   | 1.00      | 0.96   | 0.98 |
+| HEALTHY        | 0.72      | 1.00   | 0.83 |
+| OVERHEATING    | 1.00      | 1.00   | 1.00 |
+| SENSOR_DROPOUT | 1.00      | 0.64   | 0.78 |
 
 **Overall accuracy: 90%.**
 
@@ -89,7 +91,7 @@ as 0.77–0.78 a few times late in the run despite the unit being genuinely
 faulty throughout.
 
 This is not a bug — it is a real consequence of how `SENSOR_DROPOUT` is
-defined: the fault fires *intermittently* (a ~35% chance per cycle after
+defined: the fault fires _intermittently_ (a ~35% chance per cycle after
 onset), so a 20-sample rolling window over a genuinely healthy unit can
 occasionally contain enough noise to statistically resemble a dropout
 glitch. Two things are worth noting about this:
@@ -118,9 +120,11 @@ Two changes address terminal flooding:
    redraws in place (ANSI cursor-up + line-clear) instead of printing a new
    block every tick. This works cleanly when running `dashboard_node`
    directly in its own terminal:
+
    ```bash
    ros2 run fleet_health_monitor dashboard_node
    ```
+
    Under `ros2 launch`, ROS multiplexes and prefixes every process's stdout
    line-by-line (`[dashboard_node-5] ...`), which interferes with in-place
    cursor redraws -- it still works, just less cleanly, since the launch
@@ -128,7 +132,7 @@ Two changes address terminal flooding:
    terminal through untouched.
 
 2. **Edge-triggered fault warnings**: `[unit_N] FAULT DETECTED: ...` now
-   logs once per state *transition* (healthy → fault, or fault type
+   logs once per state _transition_ (healthy → fault, or fault type
    change) instead of on every single incoming telemetry message. This was
    the main source of terminal flooding previously -- a persistent fault
    was logging a new WARN line at the full 10 Hz telemetry rate.
@@ -144,16 +148,21 @@ Two changes address terminal flooding:
 
 ## How to run
 
-### 1. One-time setup: generate data + train the model
+### 1. (Optional) Generate data + train the model
+
+A pre-trained `models/fault_classifier.pkl` is already included in this
+repo, so **you can skip straight to step 2** unless you want to regenerate
+the training data or retrain from scratch (e.g. after tweaking
+`fault_signatures.py`):
+
 ```bash
 cd fleet_health_monitor
 python3 scripts/generate_training_data.py   # writes data/fleet_training_data.csv
 python3 scripts/train_model.py              # writes models/fault_classifier.pkl
 ```
-(A pre-trained `models/fault_classifier.pkl` is already included, so this
-step is optional unless you want to retrain.)
 
 ### 2. Build the ROS 2 package
+
 ```bash
 # from your ROS 2 workspace src/ folder
 colcon build --packages-select fleet_health_monitor
@@ -161,21 +170,26 @@ source install/setup.bash
 ```
 
 ### 3. Launch the full demo
+
 ```bash
 ros2 launch fleet_health_monitor fleet_demo.launch.py
 ```
 
 To speed up degradation for a shorter demo video (advances the simulated
 clock 3 cycles per tick instead of 1):
+
 ```bash
 ros2 launch fleet_health_monitor fleet_demo.launch.py cycle_step:=3
 ```
 
 You'll see a live, color-coded terminal table like:
+
 ```
 unit_1: HEALTHY (conf 0.98, cyc 140) | unit_2: BEARING_WEAR (conf 0.81, cyc 140) | unit_3: HEALTHY (conf 0.95, cyc 140) | unit_4: HEALTHY (conf 0.97, cyc 140)
 ```
+
 and warnings printed as units cross the fault threshold, e.g.:
+
 ```
 [unit_2] FAULT DETECTED: BEARING_WEAR (confidence 0.81) at cycle 142
 ```
@@ -184,11 +198,13 @@ The system runs indefinitely (no cycle cap) until stopped with `Ctrl+C`;
 shutdown is clean with no tracebacks.
 
 ### 4. Inspect the mission log
+
 ```bash
 cat data/mission_log.csv
 ```
 
 ## Package layout
+
 ```
 fleet_health_monitor/
   fleet_health_monitor/
@@ -197,6 +213,7 @@ fleet_health_monitor/
     unit_telemetry_publisher.py # Week 1: one node per fleet unit
     dashboard_node.py           # Week 1 + 3: subscribes to all units, runs live ML
     telemetry_logger.py         # writes /fleet/status to CSV
+    gui_monitor.py              # standalone Tkinter live status window
   scripts/
     generate_training_data.py   # offline: builds labeled CSV from fault_signatures
     train_model.py              # offline: trains + evaluates RandomForest, saves .pkl
@@ -211,6 +228,7 @@ fleet_health_monitor/
 ```
 
 ## Notes / things to check before recording the demo video
+
 - Confirm `models/fault_classifier.pkl` exists before launching (dashboard_node
   will fail to start without it — locate it via
   `ament_index_python.packages.get_package_share_directory`, not a relative
