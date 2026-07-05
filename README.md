@@ -11,6 +11,25 @@
 
 This project does not use Week 2 (Nav2/Gazebo) — it's a 2-way fusion by design, per the "at least two" requirement.
 
+## What this system can do
+
+- Run 4 independent, namespaced ROS 2 nodes simultaneously, each simulating
+  one fleet unit's telemetry (`current`, `vibration`, `temp`) at 10 Hz.
+- Classify each unit's live rolling window into one of 4 states —
+  `HEALTHY`, `BEARING_WEAR`, `OVERHEATING`, `SENSOR_DROPOUT` — using a
+  pre-trained `RandomForestClassifier`, updated continuously as new data
+  arrives.
+- Detect gradually-developing faults via trend features (`vibration_std`,
+  `temp_slope`, etc.), not just instantaneous threshold crossings.
+- Report live status via a color-coded terminal table, a `/fleet/status`
+  ROS topic, a CSV mission log, and a standalone Tkinter GUI window.
+- Log only on state _transitions_ (not every message) to avoid terminal
+  flooding, while still catching every fault onset.
+- Bring the entire fleet + dashboard + logger up with a single launch file.
+- Retrain on new fault types without any architectural change — just add
+  a new signature to `fault_signatures.py`, regenerate training data, and
+  retrain.
+
 ## Architecture
 
 ```
@@ -175,8 +194,7 @@ source install/setup.bash
 ros2 launch fleet_health_monitor fleet_demo.launch.py
 ```
 
-To speed up degradation for a shorter demo video (advances the simulated
-clock 3 cycles per tick instead of 1):
+To speed up degradation (advances the simulated clock 3 cycles per tick instead of 1):
 
 ```bash
 ros2 launch fleet_health_monitor fleet_demo.launch.py cycle_step:=3
@@ -226,3 +244,15 @@ fleet_health_monitor/
     mission_log.csv             # generated at runtime
   package.xml / setup.py / setup.cfg
 ```
+
+## Notes
+
+- Confirm `models/fault_classifier.pkl` exists before launching (dashboard_node
+  will fail to start without it — locate it via
+  `ament_index_python.packages.get_package_share_directory`, not a relative
+  path, since colcon installs it to `share/fleet_health_monitor/models/`).
+- The table needs ~20 samples (2s at 10Hz) per unit before predictions start;
+  units show "warming up..." until then.
+- Ctrl+C shutdown is clean (guarded with `rclpy.ok()` before
+  `rclpy.shutdown()` in every node's `main()`), so it exits without a
+  traceback appearing on screen.
